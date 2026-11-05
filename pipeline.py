@@ -1,14 +1,17 @@
 
+import sqlite3
 import csv
 from datetime import datetime, timezone
 from pathlib import Path
 
 INPUT_FILE = Path("data/transactions.csv")
+DATABASE_FILE = Path("transactions.db")
 
 
 def extract():
     """Read transactions from the source CSV."""
     with INPUT_FILE.open("r", newline="") as file:
+        
         reader = csv.DictReader(file)
         transactions = list(reader)
 
@@ -63,13 +66,51 @@ def transform(transactions):
     print(f"Validated {len(cleaned)} transactions")
     return cleaned
 
+def load(transactions):
+    """Load validated transactions into SQLite."""
+    with sqlite3.connect(DATABASE_FILE) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                category TEXT NOT NULL,
+                status TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+        """)
+
+        before = conn.total_changes
+
+        conn.executemany("""
+            INSERT OR IGNORE INTO transactions
+            (transaction_id, user_id, amount, category, status, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                row["transaction_id"],
+                row["user_id"],
+                row["amount"],
+                row["category"],
+                row["status"],
+                row["timestamp"]
+            )
+            for row in transactions
+        ])
+
+        inserted = conn.total_changes - before
+        total = conn.execute(
+            "SELECT COUNT(*) FROM transactions"
+        ).fetchone()[0]
+
+    print(f"Inserted {inserted} new transactions")
+    print(f"Database contains {total} transactions")
+
 
 def main():
     raw_transactions = extract()
     cleaned_transactions = transform(raw_transactions)
-
-    print("Sample cleaned transaction:")
-    print(cleaned_transactions[0] if cleaned_transactions else "None")
+    load(cleaned_transactions)
 
 
 if __name__ == "__main__":
